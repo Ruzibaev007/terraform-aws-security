@@ -646,6 +646,13 @@ See [docs/variables.md](docs/variables.md) for the full list of supported inputs
 - Or use the GitHub Actions workflow included in .github/workflows/plan.yml.
 
 ---
+
+### License
+
+This project is released under the **MIT License** — you’re free to use, adapt, and share the code for educational or portfolio purposes.
+Please include attribution to **Jiyu(Amina) An (GlobalComplianceCode)** if you reuse or reference any part of it.
+
+---
 ### Contacts
 
 **Amina Jiyu An**
