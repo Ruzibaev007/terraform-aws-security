@@ -28,3 +28,5 @@ policies-as-code/opa-wip/
 .vscode/
 .idea/
 .DS_Store
+*.zip
+terraform-aws-security-multi-account/
