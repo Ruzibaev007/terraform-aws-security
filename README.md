@@ -656,8 +656,6 @@ Please include attribution to **Jiyu(Amina) An (GlobalComplianceCode)** if you r
 ### Contacts
 
 **Amina Jiyu An**
-IAM/PAM • Security & Compliance Automation Engineer
-|Terraform • IAM/PAM • Policy-as-Code • ISO 27001 • PCI DSS • NIS2 • DORA
 - LinkedIn: [linkedin.com/in/amina0806](https://www.linkedin.com/in/amina0806/)
 - GitHub: [github.com/amina0806](https://github.com/amina0806)
 - Email: [amina.an0806@gmail.com](mailto:amina.an0806@gmail.com)
