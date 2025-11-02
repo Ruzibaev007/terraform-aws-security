@@ -29,19 +29,6 @@ It reflects how regulated organizations (finance, payments, critical infrastruct
 
 ---
 
-### Positioning
-
-This portfolio represents an **end-to-end IAM & Compliance Automation Framework** — not a lab demo.
-It demonstrates my ability to deliver:
-- **IAM/PAM guardrails** with permission boundaries and conditional MFA.
-- **Policy-as-Code enforcement** with Terraform, OPA/Rego, tfsec, and Checkov.
-- **Governance automation** aligned with ISO 27001, NIS2, and DORA.
-- **Regulator-ready evidence** for secure access control and compliance reporting.
-
-My focus: **IAM/PAM & Security Automation Engineering** — building scalable, accountable access governance for cloud and emerging AI systems.
-
----
-
 ## Table of Contents
 - [Features](#features)
 - [Deployment](#deployment)
