@@ -1,5 +1,11 @@
 # Compliance Mapping Index
 
+> **Security & Disclosure Notice**
+> This repository is published for educational and professional portfolio purposes.
+> All configurations, screenshots, and identifiers are anonymized and **do not represent any active AWS account or production environment**.
+> Secrets, access keys, and real infrastructure data have been removed in accordance with responsible disclosure practices.
+
+
 This repository demonstrates how a secure AWS multi-account baseline (built with Terraform, OPA, and AWS native services) aligns with international and European security frameworks.
 This index links to detailed mapping documents and provides a one-glance summary table.
 

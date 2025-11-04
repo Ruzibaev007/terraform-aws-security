@@ -1,5 +1,10 @@
 # NIS2 Directive Mapping
 
+> **Security & Disclosure Notice**
+> This repository is published for educational and professional portfolio purposes.
+> All configurations, screenshots, and identifiers are anonymized and **do not represent any active AWS account or production environment**.
+> Secrets, access keys, and real infrastructure data have been removed in accordance with responsible disclosure practices.
+
 This document maps the AWS Secure Multi-Account Baseline (Terraform + OPA + AWS services) to the **NIS2 Directive** (Directive (EU) 2022/2555), focusing on **Article 21 (cybersecurity risk management)** and **Article 23 (incident reporting)**.
 
 ---

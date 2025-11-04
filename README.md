@@ -2,6 +2,11 @@
 
 # AWS Multi-Framework Compliance-as-Code Baseline
 
+> **Security & Disclosure Notice**
+> This repository is published for educational and professional portfolio purposes.
+> All configurations, screenshots, and identifiers are anonymized and **do not represent any active AWS account or production environment**.
+> Secrets, access keys, and real infrastructure data have been removed in accordance with responsible disclosure practices.
+
 > Infrastructure-as-Code for automated compliance across DORA, NIS2, ISO 27001, PCI DSS, NIST, and GCC CSF
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -627,9 +632,8 @@ Please include attribution to **Jiyu(Amina) An (GlobalComplianceCode)** if you r
 
 ---
 
-### Contacts
+### AWS Multi-Framework Compliance Baseline
 
-**Amina Jiyu An**
-- LinkedIn: [linkedin.com/in/amina0806](https://www.linkedin.com/in/amina0806/)
-- GitHub: [github.com/amina0806](https://github.com/amina0806)
-- Email: [amina.an0806@gmail.com](mailto:amina.an0806@gmail.com)
+by **GlobalComplianceCode**
+Maintained by [Amina Jiyu An](https://www.linkedin.com/in/amina0806)
+GitHub: [github.com/amina0806](https://github.com/amina0806)

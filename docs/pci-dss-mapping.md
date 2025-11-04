@@ -1,5 +1,11 @@
 # PCI DSS Compliance Mapping
 
+> **Security & Disclosure Notice**
+> This repository is published for educational and professional portfolio purposes.
+> All configurations, screenshots, and identifiers are anonymized and **do not represent any active AWS account or production environment**.
+> Secrets, access keys, and real infrastructure data have been removed in accordance with responsible disclosure practices.
+
+
 This document maps the AWS secure multi-account baseline to key **PCI DSS v4.0** requirements.
 
 | Step | Implementation Example | PCI DSS Requirement |

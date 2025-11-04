@@ -1,6 +1,12 @@
 
 # Audit Checklist — AWS Secure Baseline (Terraform + PaC)
 
+> **Security & Disclosure Notice**
+> This repository is published for educational and professional portfolio purposes.
+> All configurations, screenshots, and identifiers are anonymized and **do not represent any active AWS account or production environment**.
+> Secrets, access keys, and real infrastructure data have been removed in accordance with responsible disclosure practices.
+
+
 Evidence links point to screenshots and mappings in the repo.
 
 ---
