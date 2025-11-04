@@ -214,7 +214,6 @@ resource "aws_s3_bucket_policy" "conformance_artifacts" {
   policy = data.aws_iam_policy_document.conformance_artifacts.json
 }
 
-# ------------------ AWS Config: service-linked role + recorder + channel ------------------
 
 # Recorder
 resource "aws_config_configuration_recorder" "this" {

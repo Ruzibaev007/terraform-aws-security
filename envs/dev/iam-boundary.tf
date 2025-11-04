@@ -10,7 +10,7 @@ module "permissions_boundary" {
   source = "../../modules/iam/permission-boundary"
   name   = "tf-step5-permissions-boundary"
   allowed_kms_key_arns = [
-    "arn:aws:kms:us-east-1:958006149724:key/mrk-27d3409cf7c04b4ea998f16c7ae654a0"
+     var.allowed_kms_key_arn
   ]
 }
 

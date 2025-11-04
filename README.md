@@ -1,6 +1,12 @@
 [![terraform-security-checks](https://github.com/amina0806/terraform-aws-security-multi-account/actions/workflows/plan.yml/badge.svg)](https://github.com/amina0806/terraform-aws-security-multi-account/actions/workflows/plan.yml)
 
-# Enterprise IAM & Security Governance Automation (Terraform + Policy-as-Code)
+# AWS Multi-Framework Compliance-as-Code Baseline
+
+> Infrastructure-as-Code for automated compliance across DORA, NIS2, ISO 27001, PCI DSS, NIST, and GCC CSF
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Terraform](https://img.shields.io/badge/Terraform-1.0+-purple.svg)](https://www.terraform.io/)
+[![OPA](https://img.shields.io/badge/OPA-Policy--as--Code-orange.svg)](https://www.openpolicyagent.org/)
 
 This project demonstrates how to design and automate **identity, access, and compliance governance** across multi-account AWS environments using **Infrastructure-as-Code** and **Policy-as-Code** practices.
 
@@ -61,26 +67,6 @@ It reflects how regulated organizations (finance, payments, critical infrastruct
 - **Policy-as-Code**: OPA/Rego checks, tfsec, and Checkov automated in CI/CD pipelines.
 - **Evidence-first**: Screenshot-driven documentation for audits.
 - **Future-ready**: Extendable to AI Governance (model access and compliance automation).
-
----
-
-## Deployment
-
-Supports multi-environment deployment (`dev`, `prod`) with **remote state + KMS encryption** and **pre-apply compliance validation**.
-
-### 1) Prerequisites
-- **AWS CLI** with admin role/session (**MFA recommended**)
-- **Terraform v1.6+**
-- **Remote state backend (S3 + DynamoDB)**
-
-```bash
-aws s3api create-bucket --bucket amina-tf-state --region us-east-1
-aws dynamodb create-table \
-  --table-name amina-tf-locks \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
-
 
 ---
 

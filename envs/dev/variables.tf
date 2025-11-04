@@ -19,3 +19,8 @@ variable "enable_guardduty" {
   type    = bool
   default = false
 }
+
+variable "allowed_kms_key_arn" {
+  description = "KMS key ARN allowed for encryption (kept private)"
+  type        = string
+}
