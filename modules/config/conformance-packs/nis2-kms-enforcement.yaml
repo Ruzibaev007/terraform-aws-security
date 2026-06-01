@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "NIS2 Art.25 — Custom Config rules for S3 KMS enforcement (fixed YAML)"
+
+Parameters:
+  AllowedKmsKeyArns:
+    Type: CommaDelimitedList
+    Description: "Allowed KMS Key ARNs for S3 default encryption"
+
+Resources:
+
+  # ─── Rule 1: S3 bucket must have SSE enabled ───
+  S3BucketSSEEnabled:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: s3-bucket-sse-enabled
+      Description: "NIS2 Art.25: S3 bucket must have server-side encryption"
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED
+
+  # ─── Rule 2: S3 bucket must use specific allowed KMS key ───
+  # FIXED: was missing indentation (broken for 7 months!)
+  KmsKeyEnforcedRule:
+    Type: AWS::Config::ConfigRule
+    DependsOn: KmsRuleInvokePermission
+    Properties:
+      ConfigRuleName: s3-bucket-kms-key-enforced
+      Description: "NIS2 Art.25: S3 must use only approved KMS keys"
+      InputParameters:
+        AllowedKmsKeyArns: !Join [",", !Ref AllowedKmsKeyArns]
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: CUSTOM_LAMBDA
+        SourceIdentifier: !GetAtt KmsRuleFunction.Arn
+        SourceDetails:
+          - EventSource: aws.config
+            MessageType: ConfigurationItemChangeNotification
+          - EventSource: aws.config
+            MessageType: OversizedConfigurationItemChangeNotification
+
+  # ─── Lambda Permission ───
+  # FIXED: was missing indentation (broken for 7 months!)
+  KmsRuleInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref KmsRuleFunction
+      Principal: config.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt KmsKeyEnforcedRule.Arn
+
+  # ─── Lambda IAM Role ───
+  KmsRuleFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-kms-rule-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AllowS3EncAndConfig
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketEncryption
+                  - config:PutEvaluations
+                Resource: "*"
+
+  # ─── Lambda Function (Python 3.12) ───
+  KmsRuleFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-kms-key-check"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 60
+      Role: !GetAtt KmsRuleFunctionRole.Arn
+      Description: "NIS2 Art.25: Validates S3 bucket uses allowed KMS key"
+      Environment:
+        Variables:
+          ALLOWED_KMS_ARNS: !Join [",", !Ref AllowedKmsKeyArns]
+      Code:
+        ZipFile: |
+          import os, json, boto3, botocore
+          s3     = boto3.client('s3')
+          config = boto3.client('config')
+
+          def evaluate_bucket(bucket, allowed_arns):
+              """
+              NIS2 Art.25: Check S3 bucket uses allowed KMS key
+              Returns (compliance_type, annotation)
+              """
+              try:
+                  enc   = s3.get_bucket_encryption(Bucket=bucket)
+                  rules = enc['ServerSideEncryptionConfiguration']['Rules']
+
+                  for r in rules:
+                      d    = r.get('ApplyServerSideEncryptionByDefault', {})
+                      algo = d.get('SSEAlgorithm')
+                      key  = d.get('KMSMasterKeyID', '')
+
+                      if algo == 'aws:kms' and key:
+                          # Check against allowed ARNs (full ARN or key ID)
+                          for allowed in allowed_arns:
+                              if allowed in key or key in allowed:
+                                  return 'COMPLIANT', f'Bucket uses approved KMS key'
+                          return 'NON_COMPLIANT', f'Bucket uses unapproved KMS key: {key}'
+
+                  return 'NON_COMPLIANT', 'Bucket not using aws:kms encryption'
+
+              except botocore.exceptions.ClientError as e:
+                  code = e.response['Error']['Code']
+                  if code == 'ServerSideEncryptionConfigurationNotFoundError':
+                      return 'NON_COMPLIANT', f'Bucket {bucket} has no encryption — NIS2 Art.25 violation!'
+                  raise
+
+          def lambda_handler(event, context):
+              allowed_raw  = os.environ.get('ALLOWED_KMS_ARNS', '')
+              allowed_arns = [a.strip() for a in allowed_raw.split(',') if a.strip()]
+
+              invoking_event = json.loads(event['invokingEvent'])
+              ci             = invoking_event.get('configurationItem')
+
+              if ci:
+                  bucket          = ci.get('resourceName')
+                  compliance, msg = evaluate_bucket(bucket, allowed_arns)
+                  result = {
+                      'ComplianceResourceType': ci['resourceType'],
+                      'ComplianceResourceId':   ci['resourceId'],
+                      'ComplianceType':         compliance,
+                      'Annotation':             msg,
+                      'OrderingTimestamp':      ci['configurationItemCaptureTime']
+                  }
+              else:
+                  summary         = invoking_event['configurationItemSummary']
+                  bucket          = summary['resourceName']
+                  compliance, msg = evaluate_bucket(bucket, allowed_arns)
+                  result = {
+                      'ComplianceResourceType': 'AWS::S3::Bucket',
+                      'ComplianceResourceId':   bucket,
+                      'ComplianceType':         compliance,
+                      'Annotation':             msg,
+                      'OrderingTimestamp':      invoking_event.get('notificationCreationTime', '')
+                  }
+
+              config.put_evaluations(
+                  Evaluations=[result],
+                  ResultToken=event['resultToken']
+              )
+
+              print(f"NIS2 Art.25 eval: {bucket} → {compliance}: {msg}")
+              return {'statusCode': 200}
