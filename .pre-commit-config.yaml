@@ -1,26 +1,48 @@
 repos:
+  # Standard hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
-
       - id: mixed-line-ending
         args: [--fix=lf]
-
-
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
-
-
       - id: end-of-file-fixer
-
-
       - id: check-added-large-files
         args: ["--maxkb=51200"]
+      - id: detect-private-key          # NIS2 Art.25: no private keys in git
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
 
+  # Terraform formatting
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.92.0
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+        args:
+          - --hook-config=--retry-once-with-cleanup=true
+      - id: terraform_tfsec
+        args:
+          - --args=--minimum-severity=HIGH
+          - --args=--no-module-downloads
+      - id: terraform_checkov
+        args:
+          - --args=--compact
+          - --args=--quiet
+
+  # Secrets scanning (NIS2 Art.25 — no credentials in code)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  # Block .terraform cache
   - repo: local
     hooks:
       - id: block-terraform-cache
-        name: Block committing .terraform cache
+        name: Block .terraform cache
         language: system
         entry: bash
         args:
@@ -28,6 +50,20 @@ repos:
           - >
             if git diff --cached --name-only | grep -E '\.terraform/'; then
               echo 'ERROR: Do not commit .terraform caches.';
+              exit 1;
+            fi
+        pass_filenames: false
+
+      # Block plan files with real credentials
+      - id: block-plan-files
+        name: Block Terraform plan files
+        language: system
+        entry: bash
+        args:
+          - -c
+          - >
+            if git diff --cached --name-only | grep -E '\.(tfplan|tfstate)$'; then
+              echo 'ERROR: Do not commit .tfplan or .tfstate files — may contain secrets!';
               exit 1;
             fi
         pass_filenames: false
