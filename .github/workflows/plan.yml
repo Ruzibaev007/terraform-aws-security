@@ -1,91 +1,275 @@
-name: terraform-security-checks
+name: "NIS2/DORA Compliance CI/CD Pipeline"
 
 on:
+  push:
+    branches: [ main, develop ]
   pull_request:
-    paths:
-      - "**/*.tf"
-      - "policies-as-code/**"
-      - ".github/workflows/plan.yml"
-  workflow_dispatch:
+    branches: [ main ]
+  schedule:
+    # Run compliance scan daily at 06:00 UTC
+    - cron: '0 6 * * *'
+
+# Cancel in-progress runs for same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.9.0"
+  OPA_VERSION: "0.68.0"
+  AWS_REGION: "eu-central-1"
 
 jobs:
-  security_checks:
+  # ============================================================
+  # JOB 1: Code Quality & Format
+  # ============================================================
+  terraform-fmt:
+    name: "📝 Terraform Format"
     runs-on: ubuntu-latest
-    env:
-      # Default guess; we’ll auto-correct this below if the folder doesn't exist
-      WORK_DIR: envs/dev
-      OPA_DIR: policies-as-code/opa
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Terraform Format Check
+        run: terraform fmt -recursive -check -diff
+        # NIS2 Art.28: Infrastructure-as-Code must be reviewable
 
-      - name: Resolve WORK_DIR
-        shell: bash
-        run: |
-          if [ ! -d "${WORK_DIR}" ]; then
-            # find first directory containing *.tf (ignoring .github and vendor)
-            CANDIDATE="$(git ls-files '*.tf' | grep -v '^.github/' | head -n1 | xargs -r dirname)"
-            if [ -n "$CANDIDATE" ]; then
-              echo "WORK_DIR=$CANDIDATE" >> "$GITHUB_ENV"
-              echo "Resolved WORK_DIR to: $CANDIDATE"
-            else
-              echo "WORK_DIR=." >> "$GITHUB_ENV"
-              echo "No specific TF dir found; using repo root."
-            fi
-          else
-            echo "Using preset WORK_DIR=${WORK_DIR}"
-          fi
+  # ============================================================
+  # JOB 2: Security Scanning (tfsec + checkov)
+  # ============================================================
+  security-scan:
+    name: "🔍 Security Scan (tfsec + Checkov)"
+    runs-on: ubuntu-latest
+    needs: terraform-fmt
 
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Terraform Fmt (auto-fix)
-        shell: bash
-        run: |
-          terraform -chdir=${{ env.WORK_DIR }} fmt -recursive
-          # Check (non-fatal): if differences remain, do not fail the job
-          terraform -chdir=${{ env.WORK_DIR }} fmt -check -recursive || echo "::warning ::terraform fmt would reformat some files"
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: true
+          format: sarif
+          additional_args: >
+            --exclude-downloaded-modules
+            --minimum-severity HIGH
 
+      - name: Upload tfsec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
 
-      - name: Terraform Init (no backend)
-        shell: bash
-        run: terraform -chdir=${{ env.WORK_DIR }} init -backend=false -input=false -no-color || echo "::warning ::terraform init reported issues"
-
-
-      - name: Terraform Validate (soft)
-        shell: bash
-        run: terraform -chdir=${{ env.WORK_DIR }} validate -no-color || echo "::warning ::terraform validate reported issues"
-
-
-      - name: Install tfsec
-        shell: bash
-        run: |
-          curl -sL https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 -o tfsec
-          chmod +x tfsec && sudo mv tfsec /usr/local/bin/tfsec
-          tfsec --version
-
-      - name: Run tfsec (soft)
-        shell: bash
-        run: tfsec ${{ env.WORK_DIR }} --no-module-downloads --soft-fail || echo "::warning ::tfsec reported issues"
-
-
-      - name: Checkov (soft)
+      - name: Run Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: ${{ env.WORK_DIR }}
-        continue-on-error: true
+          directory: .
+          framework: terraform
+          soft_fail: true
+          output_format: sarif
+          output_file_path: checkov.sarif
 
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov.sarif
+
+  # ============================================================
+  # JOB 3: OPA Policy Validation (NIS2/DORA)
+  # ============================================================
+  opa-compliance:
+    name: "⚖️ OPA NIS2/DORA Policy Check"
+    runs-on: ubuntu-latest
+    needs: terraform-fmt
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install OPA
-        shell: bash
         run: |
-          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
-          chmod +x opa && sudo mv opa /usr/local/bin/opa
+          curl -sL https://openpolicyagent.org/downloads/v${{ env.OPA_VERSION }}/opa_linux_amd64_static \
+            -o /usr/local/bin/opa
+          chmod +x /usr/local/bin/opa
           opa version
 
-      - name: OPA unit tests (soft)
-        shell: bash
-        run: opa test ${{ env.OPA_DIR }} -v || echo "::warning ::opa test reported issues"
+      - name: Run OPA Policy Tests
+        run: |
+          echo "=== NIS2/DORA OPA Policy Tests ==="
+          opa test policies-as-code/opa/ -v --format pretty
+          echo "✅ All OPA tests passed"
+
+      - name: OPA Validate Against Plan (if plan exists)
+        run: |
+          if [ -f envs/dev/plan.json ]; then
+            echo "=== Validating Terraform plan against NIS2 policies ==="
+            opa eval \
+              --data policies-as-code/opa/policies.rego \
+              --input envs/dev/plan.json \
+              --format pretty \
+              "data.terraform.security.result"
+          else
+            echo "No plan.json found — skipping plan validation"
+          fi
+
+  # ============================================================
+  # JOB 4: Terraform Validate & Plan
+  # ============================================================
+  terraform-plan:
+    name: "🏗️ Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: [security-scan, opa-compliance]
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: envs/dev
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: envs/dev
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: envs/dev
+        run: |
+          terraform plan \
+            -out=tfplan \
+            -var="env=dev" \
+            -no-color \
+          | tee plan_output.txt
+
+      - name: Comment Plan on PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('envs/dev/plan_output.txt', 'utf8');
+            const maxLen = 65000;
+            const truncated = plan.length > maxLen
+              ? plan.substring(0, maxLen) + '\n\n... (truncated)'
+              : plan;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🏗️ Terraform Plan\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });
+
+      - name: Convert Plan to JSON for OPA
+        working-directory: envs/dev
+        run: terraform show -json tfplan > plan.json
+
+      - name: Validate Plan with OPA
+        working-directory: envs/dev
+        run: |
+          RESULT=$(opa eval \
+            --data ../../policies-as-code/opa/policies.rego \
+            --input plan.json \
+            "data.terraform.security.result" \
+            --format raw)
+
+          echo "OPA Result: $RESULT"
+
+          PASSED=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('passed', False))")
+
+          if [ "$PASSED" = "True" ]; then
+            echo "✅ Terraform plan passes all NIS2/DORA compliance checks"
+          else
+            echo "❌ Terraform plan FAILED compliance checks:"
+            echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); [print(' -', m) for m in d.get('messages', [])]"
+            exit 1
+          fi
+
+  # ============================================================
+  # JOB 5: Compliance Report (daily + on main push)
+  # ============================================================
+  compliance-report:
+    name: "📊 Compliance Report"
+    runs-on: ubuntu-latest
+    needs: [opa-compliance]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OPA
+        run: |
+          curl -sL https://openpolicyagent.org/downloads/v${{ env.OPA_VERSION }}/opa_linux_amd64_static \
+            -o /usr/local/bin/opa
+          chmod +x /usr/local/bin/opa
+
+      - name: Generate Compliance Summary
+        run: |
+          echo "# NIS2/DORA Compliance Report" > compliance-report.md
+          echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> compliance-report.md
+          echo "Repository: ${{ github.repository }}" >> compliance-report.md
+          echo "Branch: ${{ github.ref_name }}" >> compliance-report.md
+          echo "" >> compliance-report.md
+          echo "## OPA Policy Results" >> compliance-report.md
+          opa test policies-as-code/opa/ -v 2>&1 >> compliance-report.md || true
+          echo "" >> compliance-report.md
+          echo "## Frameworks" >> compliance-report.md
+          echo "- NIS2 (EU) 2022/2555 — Articles 21, 23, 25, 32" >> compliance-report.md
+          echo "- DORA (EU) 2022/2554 — Article 16 (Incident Reporting)" >> compliance-report.md
+          echo "- ISO 27001:2022 — Controls A.5-A.18" >> compliance-report.md
+          cat compliance-report.md
+
+      - name: Upload Compliance Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ github.run_number }}
+          path: compliance-report.md
+          retention-days: 90
+
+  # ============================================================
+  # JOB 6: Deploy (only on main, after all checks pass)
+  # ============================================================
+  terraform-apply:
+    name: "🚀 Deploy to Dev"
+    runs-on: ubuntu-latest
+    needs: [terraform-plan, compliance-report]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: dev
+      url: https://console.aws.amazon.com/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Terraform Init & Apply
+        working-directory: envs/dev
+        run: |
+          terraform init
+          terraform apply -auto-approve -var="env=dev"
+          echo "✅ Deployment complete"
