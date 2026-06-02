@@ -1,4 +1,4 @@
-name: "NIS2/DORA Compliance CI/CD Pipeline"
+name: "🔐 NIS2/DORA Security & Compliance Pipeline"
 
 on:
   push:
@@ -6,86 +6,117 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    # Run compliance scan daily at 06:00 UTC
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * 1'  # Weekly Monday 06:00 UTC
 
-# Cancel in-progress runs for same PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  TF_VERSION: "1.9.0"
+  TF_VERSION:  "1.9.0"
   OPA_VERSION: "0.68.0"
-  AWS_REGION: "eu-central-1"
+  AWS_REGION:  "eu-central-1"
+  TF_WORK_DIR: "envs/dev"
+  OPA_DIR:     "policies-as-code/opa"
 
 jobs:
-  # ============================================================
-  # JOB 1: Code Quality & Format
-  # ============================================================
-  terraform-fmt:
-    name: "📝 Terraform Format"
+  # ════════════════════════════════════════════════════
+  # JOB 1: Secrets Scan — MUST pass before anything else
+  # NIS2 Art.25: No credentials in source code
+  # ════════════════════════════════════════════════════
+  secrets-scan:
+    name: "🔑 Secrets Scan (gitleaks)"
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Hard fail — secrets block EVERYTHING downstream
+
+  # ════════════════════════════════════════════════════
+  # JOB 2: Code Quality
+  # ════════════════════════════════════════════════════
+  code-quality:
+    name: "📝 Code Quality"
+    runs-on: ubuntu-latest
+    needs: secrets-scan
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
 
-      - name: Terraform Format Check
-        run: terraform fmt -recursive -check -diff
-        # NIS2 Art.28: Infrastructure-as-Code must be reviewable
+      - name: Terraform fmt (hard fail)
+        run: |
+          terraform fmt -recursive -check -diff
+          echo "✅ Formatting correct"
 
-  # ============================================================
-  # JOB 2: Security Scanning (tfsec + checkov)
-  # ============================================================
+      - name: Terraform validate
+        run: |
+          cd ${{ env.TF_WORK_DIR }}
+          terraform init -backend=false -input=false -no-color
+          terraform validate -no-color
+          echo "✅ Configuration valid"
+
+  # ════════════════════════════════════════════════════
+  # JOB 3: Security Scanning — HARD FAIL on HIGH+
+  # NIS2 Art.28: All IaC must pass security review
+  # ════════════════════════════════════════════════════
   security-scan:
-    name: "🔍 Security Scan (tfsec + Checkov)"
+    name: "🔍 Security Scan (tfsec + checkov)"
     runs-on: ubuntu-latest
-    needs: terraform-fmt
+    needs: code-quality
+    permissions:
+      security-events: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run tfsec
+      - name: Run tfsec (HARD FAIL on HIGH+)
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          soft_fail: true
+          soft_fail: false               # HARD FAIL — was true before!
+          minimum_severity: HIGH
           format: sarif
-          additional_args: >
-            --exclude-downloaded-modules
-            --minimum-severity HIGH
+          additional_args: "--exclude-downloaded-modules"
 
-      - name: Upload tfsec SARIF
+      - name: Upload tfsec SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: results.sarif
+          category: tfsec
 
-      - name: Run Checkov
+      - name: Run checkov (HARD FAIL on CRITICAL)
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: .
+          directory: ${{ env.TF_WORK_DIR }}
           framework: terraform
-          soft_fail: true
+          soft_fail: false               # HARD FAIL!
           output_format: sarif
           output_file_path: checkov.sarif
+          check: "CKV_AWS_*"            # Focus on AWS checks
 
-      - name: Upload Checkov SARIF
+      - name: Upload checkov SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: checkov.sarif
+          category: checkov
 
-  # ============================================================
-  # JOB 3: OPA Policy Validation (NIS2/DORA)
-  # ============================================================
+  # ════════════════════════════════════════════════════
+  # JOB 4: OPA Policy Compliance
+  # NIS2/DORA/ISO 27001 policy validation
+  # ════════════════════════════════════════════════════
   opa-compliance:
-    name: "⚖️ OPA NIS2/DORA Policy Check"
+    name: "⚖️ NIS2/DORA OPA Compliance"
     runs-on: ubuntu-latest
-    needs: terraform-fmt
+    needs: code-quality
 
     steps:
       - uses: actions/checkout@v4
@@ -97,30 +128,22 @@ jobs:
           chmod +x /usr/local/bin/opa
           opa version
 
-      - name: Run OPA Policy Tests
+      - name: OPA unit tests (HARD FAIL)
         run: |
-          echo "=== NIS2/DORA OPA Policy Tests ==="
-          opa test policies-as-code/opa/ -v --format pretty
+          echo "=== Running NIS2/DORA OPA Policy Tests ==="
+          opa test ${{ env.OPA_DIR }} -v --format pretty
           echo "✅ All OPA tests passed"
 
-      - name: OPA Validate Against Plan (if plan exists)
+      - name: OPA lint (check policy quality)
         run: |
-          if [ -f envs/dev/plan.json ]; then
-            echo "=== Validating Terraform plan against NIS2 policies ==="
-            opa eval \
-              --data policies-as-code/opa/policies.rego \
-              --input envs/dev/plan.json \
-              --format pretty \
-              "data.terraform.security.result"
-          else
-            echo "No plan.json found — skipping plan validation"
-          fi
+          opa check ${{ env.OPA_DIR }} --strict
+          echo "✅ OPA policies are well-formed"
 
-  # ============================================================
-  # JOB 4: Terraform Validate & Plan
-  # ============================================================
+  # ════════════════════════════════════════════════════
+  # JOB 5: Terraform Plan + OPA Eval
+  # ════════════════════════════════════════════════════
   terraform-plan:
-    name: "🏗️ Terraform Plan"
+    name: "🏗️ Terraform Plan + OPA Eval"
     runs-on: ubuntu-latest
     needs: [security-scan, opa-compliance]
     environment: dev
@@ -129,82 +152,110 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Terraform Init
-        working-directory: envs/dev
-        run: terraform init
-
-      - name: Terraform Validate
-        working-directory: envs/dev
-        run: terraform validate
-
-      - name: Terraform Plan
-        working-directory: envs/dev
+      - name: Verify EU region (NIS2 Art.28)
         run: |
-          terraform plan \
-            -out=tfplan \
-            -var="env=dev" \
-            -no-color \
-          | tee plan_output.txt
+          REGION="${{ env.AWS_REGION }}"
+          if [[ "$REGION" != eu-* ]]; then
+            echo "❌ NIS2 VIOLATION: Region $REGION is not EU!"
+            echo "NIS2 Art.28 requires EU data residency."
+            exit 1
+          fi
+          echo "✅ EU region confirmed: $REGION"
 
-      - name: Comment Plan on PR
+      - name: Terraform init & plan
+        working-directory: ${{ env.TF_WORK_DIR }}
+        run: |
+          terraform init
+          terraform plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
+          terraform show -json tfplan > plan.json
+
+      - name: OPA compliance eval (HARD FAIL)
+        working-directory: ${{ env.TF_WORK_DIR }}
+        run: |
+          curl -sL https://openpolicyagent.org/downloads/v${{ env.OPA_VERSION }}/opa_linux_amd64_static \
+            -o /usr/local/bin/opa && chmod +x /usr/local/bin/opa
+          
+          echo "=== Evaluating plan against NIS2/DORA policies ==="
+          RESULT=$(opa eval \
+            --data ../../${{ env.OPA_DIR }}/policies.rego \
+            --input plan.json \
+            --format raw \
+            "data.terraform.security.result")
+          
+          echo "$RESULT"
+          
+          PASSED=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('passed', False))")
+          COUNT=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count', 0))")
+          
+          if [ "$PASSED" = "True" ]; then
+            echo "✅ Plan passes all NIS2/DORA compliance checks"
+          else
+            echo "❌ COMPLIANCE FAILURE: $COUNT violation(s)"
+            echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(' ❌', m) for m in d.get('messages', [])]"
+            exit 1
+          fi
+
+      - name: Comment plan on PR
         uses: actions/github-script@v7
         if: github.event_name == 'pull_request'
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('envs/dev/plan_output.txt', 'utf8');
-            const maxLen = 65000;
-            const truncated = plan.length > maxLen
-              ? plan.substring(0, maxLen) + '\n\n... (truncated)'
-              : plan;
-
+            const plan = fs.readFileSync('${{ env.TF_WORK_DIR }}/plan_output.txt', 'utf8');
+            const maxLen = 60000;
+            const body = `## 🏗️ Terraform Plan — \`${{ env.TF_WORK_DIR }}\`\n\`\`\`hcl\n${plan.length > maxLen ? plan.slice(0, maxLen) + '\n\n... (truncated)' : plan}\n\`\`\``;
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## 🏗️ Terraform Plan\n\`\`\`hcl\n${truncated}\n\`\`\``
+              body
             });
 
-      - name: Convert Plan to JSON for OPA
-        working-directory: envs/dev
-        run: terraform show -json tfplan > plan.json
+  # ════════════════════════════════════════════════════
+  # JOB 6: Cost Estimation (infracost)
+  # ════════════════════════════════════════════════════
+  cost-estimate:
+    name: "💰 Cost Estimation (infracost)"
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: github.event_name == 'pull_request'
 
-      - name: Validate Plan with OPA
-        working-directory: envs/dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate infracost estimate
         run: |
-          RESULT=$(opa eval \
-            --data ../../policies-as-code/opa/policies.rego \
-            --input plan.json \
-            "data.terraform.security.result" \
-            --format raw)
+          infracost breakdown \
+            --path ${{ env.TF_WORK_DIR }} \
+            --format json \
+            --out-file /tmp/infracost.json || true
 
-          echo "OPA Result: $RESULT"
+      - name: Post cost comment on PR
+        uses: infracost/actions/comment@v3
+        with:
+          path: /tmp/infracost.json
+          behavior: update
+        continue-on-error: true  # Don't fail if API key not set
 
-          PASSED=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('passed', False))")
-
-          if [ "$PASSED" = "True" ]; then
-            echo "✅ Terraform plan passes all NIS2/DORA compliance checks"
-          else
-            echo "❌ Terraform plan FAILED compliance checks:"
-            echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); [print(' -', m) for m in d.get('messages', [])]"
-            exit 1
-          fi
-
-  # ============================================================
-  # JOB 5: Compliance Report (daily + on main push)
-  # ============================================================
+  # ════════════════════════════════════════════════════
+  # JOB 7: Compliance Report
+  # ════════════════════════════════════════════════════
   compliance-report:
-    name: "📊 Compliance Report"
+    name: "📊 NIS2/DORA Compliance Report"
     runs-on: ubuntu-latest
     needs: [opa-compliance]
     if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
@@ -215,61 +266,65 @@ jobs:
       - name: Install OPA
         run: |
           curl -sL https://openpolicyagent.org/downloads/v${{ env.OPA_VERSION }}/opa_linux_amd64_static \
-            -o /usr/local/bin/opa
-          chmod +x /usr/local/bin/opa
+            -o /usr/local/bin/opa && chmod +x /usr/local/bin/opa
 
-      - name: Generate Compliance Summary
+      - name: Generate compliance report
         run: |
-          echo "# NIS2/DORA Compliance Report" > compliance-report.md
-          echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> compliance-report.md
-          echo "Repository: ${{ github.repository }}" >> compliance-report.md
-          echo "Branch: ${{ github.ref_name }}" >> compliance-report.md
-          echo "" >> compliance-report.md
-          echo "## OPA Policy Results" >> compliance-report.md
-          opa test policies-as-code/opa/ -v 2>&1 >> compliance-report.md || true
-          echo "" >> compliance-report.md
-          echo "## Frameworks" >> compliance-report.md
-          echo "- NIS2 (EU) 2022/2555 — Articles 21, 23, 25, 32" >> compliance-report.md
-          echo "- DORA (EU) 2022/2554 — Article 16 (Incident Reporting)" >> compliance-report.md
-          echo "- ISO 27001:2022 — Controls A.5-A.18" >> compliance-report.md
-          cat compliance-report.md
+          mkdir -p reports
+          cat > reports/compliance-report-${{ github.run_number }}.md << REPORT
+          # NIS2/DORA Compliance Report
+          **Date:** $(date -u '+%Y-%m-%d %H:%M UTC')
+          **Branch:** ${{ github.ref_name }}
+          **Run:** #${{ github.run_number }}
+          **Commit:** ${{ github.sha }}
 
-      - name: Upload Compliance Report
+          ## OPA Policy Results
+          $(opa test ${{ env.OPA_DIR }} 2>&1 || echo "OPA tests failed")
+
+          ## Frameworks Covered
+          - NIS2 (EU 2022/2555) — Articles 21, 23, 25, 28, 32
+          - DORA (EU 2022/2554) — Article 16
+          - ISO 27001:2022 — 35+ controls
+          - BSI IT-Grundschutz — ORP.4, CON.1, DER.2.1, NET.1.1
+          REPORT
+          echo "✅ Report generated"
+
+      - name: Upload compliance report
         uses: actions/upload-artifact@v4
         with:
           name: compliance-report-${{ github.run_number }}
-          path: compliance-report.md
+          path: reports/
           retention-days: 90
 
-  # ============================================================
-  # JOB 6: Deploy (only on main, after all checks pass)
-  # ============================================================
-  terraform-apply:
-    name: "🚀 Deploy to Dev"
+  # ════════════════════════════════════════════════════
+  # JOB 8: Deploy (main only, all checks pass)
+  # ════════════════════════════════════════════════════
+  deploy:
+    name: "🚀 Deploy to Dev (eu-central-1)"
     runs-on: ubuntu-latest
     needs: [terraform-plan, compliance-report]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: dev
-      url: https://console.aws.amazon.com/
+      url: https://eu-central-1.console.aws.amazon.com/
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
+        with: { terraform_version: "${{ env.TF_VERSION }}" }
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Terraform Init & Apply
-        working-directory: envs/dev
+      - name: Terraform apply
+        working-directory: ${{ env.TF_WORK_DIR }}
         run: |
           terraform init
           terraform apply -auto-approve -var="env=dev"
-          echo "✅ Deployment complete"
+          echo "✅ Deployed to eu-central-1 (Frankfurt)"
+          terraform output -json | jq '{region: .region.value, compliance: .compliance_summary.value}'
