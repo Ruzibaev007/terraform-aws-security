@@ -69,3 +69,6 @@ Initial public release of AWS multi-account security baseline.
 - CloudTrail + KMS logging module
 - OPA/Rego policy basics (GuardDuty, SecurityHub)
 - GitHub Actions CI/CD pipeline
+
+## [3.0.1] - 2026-06-06
+- BSI TR-02102 cryptographic standards added
