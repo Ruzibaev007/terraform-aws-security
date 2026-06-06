@@ -1,4 +1,4 @@
-[![NIS2/DORA CI](https://github.com/Protector080322/terraform-aws-security/actions/workflows/plan.yml/badge.svg)](https://github.com/Protector080322/terraform-aws-security/actions/workflows/plan.yml)
+[![NIS2/DORA CI](https://github.com/Ruzibaev007/terraform-aws-security/actions/workflows/plan.yml/badge.svg)](https://github.com/Ruzibaev007/terraform-aws-security/actions/workflows/plan.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![NIS2 Compliant](https://img.shields.io/badge/NIS2-Compliant-blue?logo=eu)](compliance/nis2/README.md)
 [![DORA Ready](https://img.shields.io/badge/DORA-Ready-orange)](compliance/dora/README.md)
@@ -276,7 +276,7 @@ make plan && make apply   # Infrastruktur deployen
 | Erheblicher Sicherheitsvorfall | **24 Stunden** (Erstmeldung) | BSI |
 | Vollständige Meldung | **72 Stunden** | BSI |
 | Abschlussbericht | **1 Monat** | BSI |
-| **BSI Meldung:** | | https://www.bsi.bund.de/meldung |
+| **BSI Meldung:** | | https://www.bsi.bund.de|
 
 ### 💰 Zielgruppen in Deutschland
 
@@ -302,11 +302,11 @@ MIT License — free to use, modify, and distribute.
 
 ## 👤 Maintainer
 
-**[Protector080322](https://github.com/Protector080322)**
+**[Protector080322](https://github.com/Ruzibaev007)**
 Berlin, Germany | Security Architect | NIS2 | AWS | Terraform
 
-📧 security@cybercheck-infra.de
-🔗 [GitHub](https://github.com/Protector080322/terraform-aws-security)
+📧 z.ruzibaev@mail.de
+🔗 [GitHub](https://github.com/Ruzibaev007/terraform-aws-security)
 
 ---
 
