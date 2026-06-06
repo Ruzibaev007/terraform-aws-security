@@ -302,7 +302,7 @@ MIT License — free to use, modify, and distribute.
 
 ## 👤 Maintainer
 
-**[Protector080322](https://github.com/Ruzibaev007)**
+**[Ruzibaev007](https://github.com/Ruzibaev007)**
 Berlin, Germany | Security Architect | NIS2 | AWS | Terraform
 
 📧 z.ruzibaev@mail.de
