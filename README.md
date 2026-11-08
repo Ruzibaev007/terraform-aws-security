@@ -276,7 +276,7 @@ make plan && make apply   # Infrastruktur deployen
 | Erheblicher Sicherheitsvorfall | **24 Stunden** (Erstmeldung) | BSI |
 | Vollständige Meldung | **72 Stunden** | BSI |
 | Abschlussbericht | **1 Monat** | BSI |
-| **BSI Meldung:** | | https://www.bsi.bund.de|
+| **BSI Meldung:** | | BSI
 
 ### 💰 Zielgruppen in Deutschland
 
